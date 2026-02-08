@@ -64,9 +64,17 @@ class Feature(TViewPrototype):
 
 @dataclass
 class CtxMemoryStruct(Feature):
+    _fn: str = field(default="memory_state.json")
     data: dict[str, t.Any] = field(default_factory=dict)
 
+    def _save(self):
+        mc.storage.write_json(self._fn, self.data, backup_existing=False, rewrite_existing=True)
+
+    def _load(self):
+        self.data = mc.storage.read_json(self._fn, default=self.data)
+
     def __post_init__(self):
+        self._load()
         super().__post_init__()
 
         @ai_func(name=f"{self.name}.drop")
@@ -79,6 +87,7 @@ class CtxMemoryStruct(Feature):
             for key in keys[:-1]:
                 d = d.get(key, {})
             d.pop(keys[-1], None)
+            self._save()
 
         @ai_func(name=f"{self.name}.write")
         def write(path: str, value: t.Any):
@@ -92,6 +101,7 @@ class CtxMemoryStruct(Feature):
                     d[key] = {}
                 d = d[key]
             d[keys[-1]] = value
+            self._save()
 
         def view(): return "DATA:\n" + yaml.dump(self.data, indent=2)
 
@@ -152,7 +162,7 @@ async def py_exec(content: str) -> str:
 
 
 async def agent(inp = "..."):
-    history: deque[mc.Msg] = deque(maxlen=10)
+    history: deque[mc.Msg] = deque(maxlen=50)
     history.append(mc.UserMsg(inp))
 
     def render_main() -> mc.SysMsg: return mc.prompt(prompt, **globals(), str=str).as_system

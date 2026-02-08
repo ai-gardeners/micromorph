@@ -1,3 +1,4 @@
+import os
 import sys
 from pathlib import Path
 
@@ -31,5 +32,10 @@ def request_master(message: str) -> str:
     print(f"{ui.magenta(message)}\n>> ", file=sys.__stdout__, flush=True)
     return input()
 
-tools = [write_file, read_file, delete_file, ls, request_master]
+@ai_func()
+def restart():
+    """Restart the current process (run it after .py files editing)."""
+    os.execv(sys.executable, [sys.executable] + sys.argv)
+
+tools = [write_file, read_file, delete_file, ls, request_master, restart]
 __all__ = [t.__name__ for t in tools] + ["tools"]
