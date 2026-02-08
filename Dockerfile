@@ -1,16 +1,17 @@
-FROM python:3.13-alpine
+FROM ghcr.io/astral-sh/uv:python3.13-alpine
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy
 
 WORKDIR /app
+COPY pyproject.toml README.md LICENSE micromorph.py ./
 
-# Copy only what's needed to build
+# Copy project files
 COPY pyproject.toml README.md LICENSE micromorph.py ./
 
 RUN apk add --no-cache git \
-    && pip install --no-cache-dir --no-compile . \
-    && pip uninstall -y setuptools wheel \
+    && uv pip install --no-cache --python $(which python3) . \
     && rm -rf /usr/local/lib/python3.13/site-packages/googleapiclient/discovery_cache \
     && find /usr/local/lib/python3.13/site-packages -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true \
     && find /usr/local/lib/python3.13/site-packages -type d -name "tests" -exec rm -rf {} + 2>/dev/null || true \
