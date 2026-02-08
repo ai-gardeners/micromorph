@@ -1,14 +1,17 @@
 [project]
 name = "micromorph"
 version = "0.1.0"
-description = ""
+description = "Polymorhic AI agent"
 authors = [
-    {name = "Nayjest",email = "mail@vitaliy.in"}
+    {name = "Vitalii [Nayjest] Stepanenko",email = "mail@vitaliy.in"}
 ]
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.13,<3.14"
 dependencies = [
-    "ai-microcore>=5,<6",
+    "ai-microcore>=5.2,<6",
+    "anthropic",
+    "google-genai",
+    "pyyaml",
 ]
 
 
@@ -21,3 +24,8 @@ asyncio_mode = "auto"
 testpaths = [
     "tests",
 ]
+packages = [
+    { include = "micromorph" },
+]
+[tool.poetry.scripts]
+mm = "micromorph:main"

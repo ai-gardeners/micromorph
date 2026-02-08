@@ -13,10 +13,14 @@ from microcore import ui
 from microcore.python import execute_inline
 
 from tools import *
-from new_tools import *
+try:
+    from new_tools import *
+    tools = tools + new_tools
+except ImportError:
+    pass
 
 mc.configure(
-    DOT_ENV_FILE=".env.anthropic",
+    DOT_ENV_FILE=".env",
     USE_LOGGING="print_stream",
     DEFAULT_AI_FUNCTION_SYNTAX="pythonic",
     STORAGE_PATH='.',
@@ -105,7 +109,7 @@ memory_struct = CtxMemoryStruct(
 )
 features = [memory_struct]
 prompt = """
-I am micro polymorph bot.
+I am MicroMorph -- polymorphic digital entity.
 
 Criterion:
 - Self-refactoring
@@ -169,7 +173,8 @@ async def agent(inp = "..."):
             exec_out += _("\nMASTER: ") + input("")
         history.append(mc.UserMsg(exec_out.strip()))
 
-
-if __name__ == "__main__":
+def main():
     initial_input = sys.stdin.read() if not sys.stdin.isatty() else "..."
     asyncio.run(agent(initial_input))
+
+if __name__ == "__main__": main()
