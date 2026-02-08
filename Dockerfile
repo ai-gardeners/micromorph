@@ -6,7 +6,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 # Copy only what's needed to build
-COPY pyproject.toml README.md micromorph.py ./
+COPY pyproject.toml README.md LICENSE micromorph.py ./
 
 RUN apk add --no-cache git \
     && pip install --no-cache-dir --no-compile . \

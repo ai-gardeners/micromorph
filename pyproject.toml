@@ -1,11 +1,12 @@
 [project]
 name = "micromorph"
 version = "0.1.0"
-description = "Polymorhic AI agent"
+description = "Polymorhic AI"
 authors = [
     {name = "Vitalii [Nayjest] Stepanenko",email = "mail@vitaliy.in"}
 ]
 readme = "README.md"
+license = { file = "LICENSE" }
 requires-python = ">=3.13,<3.14"
 dependencies = [
     "ai-microcore>=5.2,<6",
