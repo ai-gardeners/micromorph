@@ -1,3 +1,4 @@
+import sys
 import asyncio
 import inspect
 import typing as t
@@ -12,6 +13,7 @@ from microcore import ui
 from microcore.python import execute_inline
 
 from tools import *
+from new_tools import *
 
 mc.configure(
     DOT_ENV_FILE=".env.anthropic",
@@ -22,9 +24,11 @@ mc.configure(
 )
 mc.logging.LoggingConfig.STRIP_REQUEST_LINES = None
 
+
 class TViewPrototype(t.Protocol):
     def __call__(self, *args, **kwargs) -> str:
         ...
+
 
 @dataclass
 class Feature(TViewPrototype):
@@ -35,29 +39,32 @@ class Feature(TViewPrototype):
     def __post_init__(self):
         if not self.name:
             self.name = self.__class__.__name__
-    #
-    def __str__(self):
-        return str(self.__call__())
 
+    def __str__(self): return str(self.__call__())
+    def indent(self, content): return "\n" + textwrap.indent(str(content).strip(), "    ")
 
     def __call__(self, **kwargs) -> str:
-        return mc.prompt("""
-        # [BEGIN_FEATURE: {{this.name}}]
-            {%- for view in this.views %}
-            {{- "\n"+textwrap.indent(str(view()), "    ") }}
-            {%- endfor -%}
-            {%- for tool in this.tools %}
-            [BEGIN_TOOL]
-            {{- "\n"+textwrap.indent(str(tool), "    ") }}
-            [END_TOOL]
-            {% endfor %}
-        [ENDFEATURE]""", this=self,**kwargs,textwrap=textwrap, str=str, remove_indent=True)
+        return mc.prompt("""        
+            [FEATURE: {{name}}]
+                {%- for view in views %}{{ indent(view()) }}{% endfor -%}
+                {%- for tool in tools %}
+                [TOOL]
+                {{- indent(tool) }}
+                [/TOOL]
+                {%- endfor %}
+            [/FEATURE]""",
+            **{k: getattr(self, k) for k in dir(self) if not k.startswith('_')},
+            **kwargs,
+        )
+
+
 @dataclass
 class CtxMemoryStruct(Feature):
     data: dict[str, t.Any] = field(default_factory=dict)
 
     def __post_init__(self):
         super().__post_init__()
+
         @ai_func(name=f"{self.name}.drop")
         def drop(path: str):
             """
@@ -82,27 +89,21 @@ class CtxMemoryStruct(Feature):
                 d = d[key]
             d[keys[-1]] = value
 
-        self.tools = [drop, write]
-        self.views = [self.view]
-        for tool in self.tools:
-            setattr(self, tool.__name__, tool)
+        def view(): return "DATA:\n" + yaml.dump(self.data, indent=2)
 
-    # def __call__(self, *args, **kwargs) -> str:
-    #     return super().__call__(self, **kwargs)
+        self.tools, self.views = [drop, write], [view]
+        for tool in self.tools: setattr(self, tool.__name__, tool)
 
-    def view(self):
-        return "DATA:\n" + yaml.dump(self.data, indent=2)
 
-memory_struct=CtxMemoryStruct(
-        name="memory_struct",
-        data={
-            "observations": {
-                "sub-categoy-1": "Likely I should delete this"
-            }
+memory_struct = CtxMemoryStruct(
+    name="memory_struct",
+    data={
+        "observations": {
+            "sub-categoy-1": "Likely I should delete this"
         }
-    )
+    }
+)
 features = [memory_struct]
-
 prompt = """
 I am micro polymorph bot.
 
@@ -115,59 +116,60 @@ Criterion:
 {% for feature in features %}
 {{ feature }}
 {% endfor %}
-{% for tool in tools %}
-[BEGIN_TOOL]
-{{- "\n"+textwrap.indent(str(tool), "    ") }}
-[END_TOOL]
-{% endfor %}
+{%- for tool in tools %}
+[TOOL]
+{{ tool }}
+[/TOOL]
+{%- endfor %}
 (!) Put all calls inside <CALL>...</CALL> tag. Each call should be valid python function call.
+(!) Request master's approve before writing files
 """
+
+
+def _(text):
+    print(text, end="", flush=True)
+    return text
+
 
 async def py_exec(content: str) -> str:
     """Execute code and return captured output."""
-    summary = f"{ui.blue}{ui.bright}CALL:{ui.yellow}{ui.normal} {content}{ui.reset}\n"
+    summary = _(f"{ui.blue}{ui.bright}CALL:{ui.yellow}{ui.normal} {content}{ui.reset}\n")
     frame = inspect.currentframe().f_back
     namespace = {**frame.f_globals, **frame.f_locals}
 
     result, output, error = await execute_inline(content, namespace)
     if result:
-        summary += f"-> {ui.gray}{repr(result).strip()}{ui.reset}\n"
+        summary += _(f"-> {ui.gray}{repr(result).strip()}{ui.reset}\n")
     if output:
-        summary += f"[PRINTED]:{ui.gray}\n{output}\n{ui.reset}\n"
+        summary += _(f"[PRINTED]:{ui.gray}\n{output}\n{ui.reset}\n")
     if error:
-        summary += f"[ERROR]{ui.red}:\n{repr(error).strip()}\n{ui.reset}\n"
-    return summary.strip() or "(silently executed with no output)"
+        summary += _(f"[ERROR]{ui.red}:\n{repr(error).strip()}\n{ui.reset}\n")
+    return summary.strip() or _("(silently executed with no output)")
 
-async def agent():
 
+async def agent(inp = "..."):
     history: deque[mc.Msg] = deque(maxlen=10)
-    history.append(mc.UserMsg("..."))
+    history.append(mc.UserMsg(inp))
 
     def render_main() -> mc.SysMsg: return mc.prompt(prompt, **globals(), str=str).as_system
 
     while True:
-        out = await mc.allm(
-            list(history)
-            + [render_main()]
-        )
+        messages = list(history) + [render_main()]
+        out = await mc.allm(messages)
         blocks = mc.utils.extract_tags(out, True)
         print("\n")
         exec_out = ""
         for tag, attrs, content in blocks:
             if tag == "CALL":
-                out = await py_exec(content)
-                print(out)
-                exec_out += out + "\n"
-
-        exec_out = "TOOLS CALLING OUTPUT:\n" + exec_out if exec_out else "TOOLS CALLING OUTPUT: (no calls)"
+                exec_out += await py_exec(content) + "\n"
+        if exec_out:
+            exec_out = "TOOLS CALLING OUTPUT:\n" + exec_out
+        else:
+            exec_out = _(ui.red("NO TOOLS WAS CALLED."))
+            exec_out += _("\nMASTER: ") + input("")
         history.append(mc.UserMsg(exec_out.strip()))
-        user_input = input("USER:").strip()
-        if user_input:
-            history.append(mc.UserMsg(user_input))
 
-
-async def main():
-    await agent()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    initial_input = sys.stdin.read() if not sys.stdin.isatty() else "..."
+    asyncio.run(agent(initial_input))
