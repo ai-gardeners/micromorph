@@ -10,8 +10,7 @@ COPY pyproject.toml README.md LICENSE micromorph.py ./
 
 RUN apk add --no-cache git \
     && pip install --no-cache-dir --no-compile . \
-    && pip uninstall -y pip setuptools wheel \
-    && rm -rf pyproject.toml README.md src/ \
+    && pip uninstall -y setuptools wheel \
     && rm -rf /usr/local/lib/python3.13/site-packages/googleapiclient/discovery_cache \
     && find /usr/local/lib/python3.13/site-packages -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true \
     && find /usr/local/lib/python3.13/site-packages -type d -name "tests" -exec rm -rf {} + 2>/dev/null || true \
