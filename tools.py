@@ -1,6 +1,8 @@
+import sys
 from pathlib import Path
 
 import microcore as mc
+from microcore import ui
 from microcore.ai_func import ai_func
 
 @ai_func()
@@ -13,13 +15,16 @@ def read_file(name: str, encoding: str = "utf-8") -> str:
 
 @ai_func()
 def ls(path: str) -> list[str]:
+    """List files"""
     return [str(p) for p in Path(path).iterdir()]
 
 @ai_func()
 def request_master(message: str) -> str:
-    """Sends a message to the master user or process and waits for the response."""
-    return input(message)
+    """Send a message to the master user or process and wait for response."""
+    # ensure it goes to the original stdout, not captured by python exec mechanism
+    print(f"{ui.magenta(message)}\n>> ", file=sys.__stdout__, flush=True)
+    return input()
 
-tools = [write_file, read_file, ls]
+tools = [write_file, read_file, ls, request_master]
 
-__all__ = ["tools", "write_file", "read_file", "ls"]
+__all__ = [t.__name__ for t in tools] + ["tools"]
