@@ -3,4 +3,4 @@ build:
 sh:
 	docker run -it -v .:/app micromorph sh
 mm:
-	python micromorph.py
+	docker run -it -v .:/app micromorph mm
