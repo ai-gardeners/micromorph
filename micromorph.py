@@ -1,3 +1,4 @@
+import os
 import sys
 import asyncio
 import inspect
@@ -12,12 +13,15 @@ from microcore.ai_func import ai_func
 from microcore import ui
 from microcore.python import execute_inline
 
+
 from tools import *
 try:
     from new_tools import *
     tools = tools + new_tools
 except ImportError:
     pass
+
+# ------------- BOOTSTRAP -------------
 
 mc.configure(
     DOT_ENV_FILE=".env",
@@ -27,7 +31,9 @@ mc.configure(
     EMBEDDING_DB_TYPE=mc.EmbeddingDbType.NONE,
 )
 mc.logging.LoggingConfig.STRIP_REQUEST_LINES = None
+print(f"[worker #{os.getpid()} started]")
 
+# ------------ CORE CLASSES -------------
 
 class TViewPrototype(t.Protocol):
     def __call__(self, *args, **kwargs) -> str:
@@ -161,9 +167,9 @@ async def py_exec(content: str) -> str:
     return summary.strip() or _("(silently executed with no output)")
 
 
-async def agent(inp = "..."):
+async def agent(master_instructions ="..."):
     history: deque[mc.Msg] = deque(maxlen=50)
-    history.append(mc.UserMsg(inp))
+    history.append(mc.UserMsg(master_instructions))
 
     def render_main() -> mc.SysMsg: return mc.prompt(prompt, **globals(), str=str).as_system
 
@@ -184,7 +190,11 @@ async def agent(inp = "..."):
         history.append(mc.UserMsg(exec_out.strip()))
 
 def main():
-    initial_input = sys.stdin.read() if not sys.stdin.isatty() else "..."
-    asyncio.run(agent(initial_input))
+    if sys.stdin.isatty():
+        master_instructions = "..."
+    else:
+        master_instructions = sys.stdin.read()
+        sys.stdin = open('/dev/tty', 'r')
+    asyncio.run(agent(master_instructions))
 
 if __name__ == "__main__": main()
