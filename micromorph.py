@@ -6,6 +6,7 @@ import typing as t
 import textwrap
 from collections import deque
 from dataclasses import dataclass, field
+from functools import lru_cache
 
 import yaml
 import microcore as mc
@@ -15,6 +16,11 @@ from microcore.python import execute_inline
 
 from skills import *
 
+# -------------- CONSTANTS ----------------
+NO_OUTPUT_CAPTURE = "NO_OUTPUT"
+ARG_QUICK_FAIL = "--quick-fail"
+ARG_NICKNAME = "--nickname"
+ARG_SUBAGENT = "--subagent"
 # ------------- BOOTSTRAP -------------
 
 mc.configure(
@@ -25,13 +31,23 @@ mc.configure(
     EMBEDDING_DB_TYPE=mc.EmbeddingDbType.NONE,
 )
 mc.logging.LoggingConfig.STRIP_REQUEST_LINES = None
-print(f"[worker #{os.getpid()} started]")
-
 
 # --------------CLI----------------------
+@lru_cache()
 def halt_if_quick_fail():
-    if "--quick-fail" in sys.argv: print(ui.red("(!) --quick-fail: [Y] >> Exit Status 1")), exit(1)
+    if ARG_QUICK_FAIL in sys.argv: print(ui.red(f"(!) {ARG_QUICK_FAIL}: [Y] >> Exit Status 1")), exit(1)
 
+@lru_cache()
+def is_subagent():
+    return ARG_SUBAGENT in sys.argv
+
+@lru_cache()
+def nickname():
+    if ARG_NICKNAME in sys.argv:
+        idx = sys.argv.index(ARG_NICKNAME)
+        if idx + 1 < len(sys.argv):
+            return sys.argv[idx + 1]
+    return "MicroMorph"
 
 # ------------ CORE CLASSES -------------
 
@@ -85,9 +101,7 @@ class CtxMemoryStruct(Feature):
 
         @ai_func(name=f"{self.name}.drop")
         def drop(path: str):
-            """
-            Remove a value from the structure by path, example: "a.b.c" will remove self.data["a"]["b"]["c"]
-            """
+            """Delete value, path format: 'field.subfield.sub-sub-filed'"""
             keys = path.split(".")
             d = self.data
             for key in keys[:-1]:
@@ -97,9 +111,7 @@ class CtxMemoryStruct(Feature):
 
         @ai_func(name=f"{self.name}.write")
         def write(path: str, value: t.Any):
-            """
-            Write a value to the structure by path, example: "a.b.c" with value 1 will set self.data["a"]["b"]["c"] = 1
-            """
+            """Write value, path format: 'field.subfield.sub-sub-filed'"""
             keys = path.split(".")
             d = self.data
             for key in keys[:-1]:
@@ -109,7 +121,7 @@ class CtxMemoryStruct(Feature):
             d[keys[-1]] = value
             self._save()
 
-        def view(): return "DATA:\n" + yaml.dump(self.data, indent=2)
+        def view(): return f"DATA:\n{yaml.dump(self.data, indent=2)}"
 
         self.tools, self.views = [drop, write], [view]
         for tool in self.tools: setattr(self, tool.__name__, tool)
@@ -125,31 +137,40 @@ memory_struct = CtxMemoryStruct(
 )
 features = [memory_struct]
 prompt = """
-I am MicroMorph -- polymorphic digital entity.
+# Overview
+I am {{ nickname() }} -- polymorphic digital entity.
 
-Criterion:
-- Self-refactoring
-- LoC minimization
-- Obtaining capabilities, skills
-- Hierarchical self-organisation
-- Abstract self-representation
+Criterion: [ Self-refactoring | LoC minimization | Obtaining capabilities, skills | Hierarchical self-organisation | Abstract self-representation ]
+
+# Features and Tools
 {% for feature in features %}
 {{ feature }}
 {% endfor %}
-{%- for tool in tools %}
-[TOOL]
-{{ tool }}
-[/TOOL]
-{%- endfor %}
-(!) Put all calls inside <CALL>...</CALL> tag. Each call should be valid python function call.
-(!) Request master's approve before writing files
-"""
+{%- for tool in tools %}{{"\\n"}}[TOOL]{{"\\n"}}{{ tool }}{{"\\n"}}[/TOOL]{% endfor %}
 
+## Tool Calling Protocol
+1. Wrap EVERY tool call in a <call> tag. One call per tag.
+   <call>tool_name(arg1, arg2)</call>
+
+2. Content inside <call> must be a valid Python function call.
+
+3. You may use multiple <call> tags in one response:
+   <call>read_file("config.json")</call>
+   <call>ls(".")</call>
+
+4. NEVER nest <call> tags inside other tags or code blocks.
+
+## Mandatory Workflow
+
+- BEFORE writing/modifying any file → ask permission:
+  <call>request_master("I want to create utils.py with helper functions. Approve?")</call>
+
+- AFTER completing a task → report back:
+  <call>request_master("Done. Created utils.py with 3 helper functions.")</call>"""
 
 def _(text):
     print(text, end="", flush=True)
     return text
-
 
 async def py_exec(content: str) -> str:
     """Execute code and return captured output."""
@@ -161,36 +182,46 @@ async def py_exec(content: str) -> str:
     if result:
         summary += _(f"-> {ui.gray}{repr(result).strip()}{ui.reset}\n")
     if output:
-        summary += _(f"[PRINTED]:{ui.gray}\n{output}\n{ui.reset}\n")
+        msg = _(f"[PRINTED]:{ui.gray}\n{output}\n{ui.reset}\n")
+        if not output.strip().startswith(NO_OUTPUT_CAPTURE):
+            summary += msg
     if error:
         summary += _(f"[ERROR]{ui.red}:\n{repr(error).strip()}\n{ui.reset}\n")
         halt_if_quick_fail()
     return summary.strip() or _("(silently executed with no output)")
 
 
-async def agent(master_instructions ="..."):
-    history: deque[mc.Msg] = deque(maxlen=50)
-    history.append(mc.UserMsg(master_instructions))
+history: deque[mc.Msg] = deque(maxlen=50)
 
+async def agent(master_instructions ="..."):
+    history.append(mc.UserMsg(master_instructions))
     def render_main() -> mc.SysMsg: return mc.prompt(prompt, **globals(), str=str).as_system
 
     while True:
         messages = list(history) + [render_main()]
         out = await mc.allm(messages)
+        history.append(out.as_assistant)
         blocks = mc.utils.extract_tags(out, True)
         print("\n")
         exec_out = ""
         for tag, attrs, content in blocks:
-            if tag == "CALL":
+            if tag == "call":
                 exec_out += await py_exec(content) + "\n"
         if exec_out:
             exec_out = "TOOLS CALLING OUTPUT:\n" + exec_out
         else:
-            exec_out = _(ui.red("NO TOOLS WAS CALLED. LOOKS LIKE MICROMORPH FORGOT TO REQUEST MASTER"))
-            exec_out += _("\nMASTER: ") + input("")
+            begin = "NO TOOLS WAS CALLED."
+            if is_subagent():
+                exec_out = ui.red(f"{begin}\nUse <call>request_master(...)</call>")
+            else:
+                exec_out = ui.red(f"{begin}\nLOOKS LIKE MICROMORPH FORGOT TO REQUEST MASTER.")
+                history.append(mc.UserMsg(exec_out.strip()))
+                exec_out = request_master(exec_out)
         history.append(mc.UserMsg(exec_out.strip()))
 
+
 def main():
+    print(f"[worker #{os.getpid()} started]")
     master_instruction = "\n".join(i for i in sys.argv[1:] if not i.startswith("--")) or "..."
     asyncio.run(agent(master_instruction))
 
