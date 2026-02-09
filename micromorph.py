@@ -9,17 +9,11 @@ from dataclasses import dataclass, field
 
 import yaml
 import microcore as mc
-from microcore.ai_func import ai_func
 from microcore import ui
+from microcore.ai_func import ai_func
 from microcore.python import execute_inline
 
-
-from tools import *
-try:
-    from new_tools import *
-    tools = tools + new_tools
-except ImportError:
-    pass
+from skills import *
 
 # ------------- BOOTSTRAP -------------
 
@@ -32,6 +26,12 @@ mc.configure(
 )
 mc.logging.LoggingConfig.STRIP_REQUEST_LINES = None
 print(f"[worker #{os.getpid()} started]")
+
+
+# --------------CLI----------------------
+def halt_if_quick_fail():
+    if "--quick-fail" in sys.argv: print(ui.red("(!) --quick-fail: [Y] >> Exit Status 1")), exit(1)
+
 
 # ------------ CORE CLASSES -------------
 
@@ -164,6 +164,7 @@ async def py_exec(content: str) -> str:
         summary += _(f"[PRINTED]:{ui.gray}\n{output}\n{ui.reset}\n")
     if error:
         summary += _(f"[ERROR]{ui.red}:\n{repr(error).strip()}\n{ui.reset}\n")
+        halt_if_quick_fail()
     return summary.strip() or _("(silently executed with no output)")
 
 
@@ -185,16 +186,12 @@ async def agent(master_instructions ="..."):
         if exec_out:
             exec_out = "TOOLS CALLING OUTPUT:\n" + exec_out
         else:
-            exec_out = _(ui.red("NO TOOLS WAS CALLED."))
+            exec_out = _(ui.red("NO TOOLS WAS CALLED. LOOKS LIKE MICROMORPH FORGOT TO REQUEST MASTER"))
             exec_out += _("\nMASTER: ") + input("")
         history.append(mc.UserMsg(exec_out.strip()))
 
 def main():
-    if sys.stdin.isatty():
-        master_instructions = "..."
-    else:
-        master_instructions = sys.stdin.read()
-        sys.stdin = open('/dev/tty', 'r')
-    asyncio.run(agent(master_instructions))
+    master_instruction = "\n".join(i for i in sys.argv[1:] if not i.startswith("--")) or "..."
+    asyncio.run(agent(master_instruction))
 
 if __name__ == "__main__": main()
