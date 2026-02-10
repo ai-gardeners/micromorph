@@ -2,10 +2,11 @@ import os
 import sys
 import asyncio
 import inspect
+import signal
 import typing as t
 import textwrap
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from functools import lru_cache
 
 import yaml
@@ -21,6 +22,7 @@ NO_OUTPUT_CAPTURE = "NO_OUTPUT"
 ARG_QUICK_FAIL = "--quick-fail"
 ARG_NICKNAME = "--nickname"
 ARG_SUBAGENT = "--subagent"
+ARG_FRESH = "--fresh"
 # ------------- BOOTSTRAP -------------
 
 mc.configure(
@@ -33,13 +35,12 @@ mc.configure(
 mc.logging.LoggingConfig.STRIP_REQUEST_LINES = None
 
 # --------------CLI----------------------
-@lru_cache()
 def halt_if_quick_fail():
     if ARG_QUICK_FAIL in sys.argv: print(ui.red(f"(!) {ARG_QUICK_FAIL}: [Y] >> Exit Status 1")), exit(1)
 
-@lru_cache()
-def is_subagent():
-    return ARG_SUBAGENT in sys.argv
+def is_subagent(): return ARG_SUBAGENT in sys.argv
+
+def is_fresh_start(): return ARG_FRESH in sys.argv
 
 @lru_cache()
 def nickname():
@@ -85,8 +86,31 @@ class Feature(TViewPrototype):
 
 
 @dataclass
+class Conversation:
+    history: deque[mc.Msg] = deque(maxlen=50)
+
+    def file(self): return f"data/{nickname()}/conversation_history.json"
+
+    def save(self):
+        data = [asdict(msg) for msg in self.history]
+        mc.storage.write_json(self.file(), data, True, False)
+
+    def __post_init__(self):
+        data = mc.storage.read_json(self.file(), [])
+        self.history.extend(data)
+
+    def add(self, msg: mc.Msg):
+        self.history.append(msg)
+        self.save()
+
+    def clear(self):
+        self.history.clear()
+        mc.storage.delete(self.file())
+
+
+@dataclass
 class CtxMemoryStruct(Feature):
-    _fn: str = field(default="memory_state.json")
+    _fn: str = field(init=False)
     data: dict[str, t.Any] = field(default_factory=dict)
 
     def _save(self):
@@ -95,9 +119,14 @@ class CtxMemoryStruct(Feature):
     def _load(self):
         self.data = mc.storage.read_json(self._fn, default=self.data)
 
+    def clear(self):
+        self.data = {}
+        mc.storage.delete(self._fn)
+
     def __post_init__(self):
-        self._load()
         super().__post_init__()
+        self._fn = f"data/{nickname()}/{self.name}.yaml"
+        self._load()
 
         @ai_func(name=f"{self.name}.drop")
         def drop(path: str):
@@ -127,6 +156,7 @@ class CtxMemoryStruct(Feature):
         for tool in self.tools: setattr(self, tool.__name__, tool)
 
 
+conv = Conversation()
 memory_struct = CtxMemoryStruct(
     name="memory_struct",
     data={
@@ -191,16 +221,14 @@ async def py_exec(content: str) -> str:
     return summary.strip() or _("(silently executed with no output)")
 
 
-history: deque[mc.Msg] = deque(maxlen=50)
-
-async def agent(master_instructions ="..."):
-    history.append(mc.UserMsg(master_instructions))
+async def agent(master_instructions = "..."):
+    conv.add(mc.UserMsg(master_instructions))
     def render_main() -> mc.SysMsg: return mc.prompt(prompt, **globals(), str=str).as_system
 
     while True:
-        messages = list(history) + [render_main()]
+        messages = list(conv.history) + [render_main()]
         out = await mc.allm(messages)
-        history.append(out.as_assistant)
+        conv.add(out.as_assistant)
         blocks = mc.utils.extract_tags(out, True)
         print("\n")
         exec_out = ""
@@ -215,13 +243,28 @@ async def agent(master_instructions ="..."):
                 exec_out = ui.red(f"{begin}\nUse <call>request_master(...)</call>")
             else:
                 exec_out = ui.red(f"{begin}\nLOOKS LIKE MICROMORPH FORGOT TO REQUEST MASTER.")
-                history.append(mc.UserMsg(exec_out.strip()))
+                conv.add(mc.UserMsg(exec_out.strip()))
                 exec_out = request_master(exec_out)
-        history.append(mc.UserMsg(exec_out.strip()))
+        conv.add(mc.UserMsg(exec_out.strip()))
 
 
 def main():
     print(f"[worker #{os.getpid()} started]")
+
+    def managed_cleanup(sig, frame):
+        # triggered by kill_worker(), skills/swarm.py
+        print("cleanup by MASTER request...")
+        memory_struct.clear()
+        conv.clear()
+        sys.exit(0)
+
+    signal.signal(signal.SIGUSR1, managed_cleanup)
+
+    if is_fresh_start():
+        print(ui.yellow("(!) Starting with a fresh state, clearing conversation history and memory_struct..."))
+        conv.clear()
+        memory_struct.clear()
+
     master_instruction = "\n".join(i for i in sys.argv[1:] if not i.startswith("--")) or "..."
     asyncio.run(agent(master_instruction))
 
