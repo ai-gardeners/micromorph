@@ -9,7 +9,7 @@ readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.13,<3.14"
 dependencies = [
-    "ai-microcore>=5.2,<6",
+    "ai-microcore>=5.3,<6",
     "anthropic",
     "google-genai",
     "pyyaml",
