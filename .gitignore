@@ -3,6 +3,7 @@
 .idea
 .pytest_cache
 poetry.lock
+data
 
 # Python
 __pycache__/
