@@ -10,7 +10,7 @@ if TYPE_CHECKING:
 class Worker:
     def __init__(
         self,
-        master_thread: Conversation,
+        master_thread: "Conversation",
         nickname: str,
         master_instruction: str
     ):

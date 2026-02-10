@@ -87,7 +87,8 @@ class Feature(TViewPrototype):
 
 @dataclass
 class Conversation:
-    history: deque[mc.Msg] = deque(maxlen=50)
+    maxlen: int = field(default=100)
+    history: deque[mc.Msg] = field(init=False)
 
     def file(self): return f"data/{nickname()}/conversation_history.json"
 
@@ -95,9 +96,12 @@ class Conversation:
         data = [asdict(msg) for msg in self.history]
         mc.storage.write_json(self.file(), data, True, False)
 
-    def __post_init__(self):
+    def load(self):
         data = mc.storage.read_json(self.file(), [])
-        self.history.extend(data)
+        self.history = deque([mc.Msg(**i) for i in data], maxlen=self.maxlen)
+
+    def __post_init__(self):
+        self.load()
 
     def add(self, msg: mc.Msg):
         self.history.append(msg)
@@ -125,7 +129,7 @@ class CtxMemoryStruct(Feature):
 
     def __post_init__(self):
         super().__post_init__()
-        self._fn = f"data/{nickname()}/{self.name}.yaml"
+        self._fn = f"data/{nickname()}/{self.name}.json"
         self._load()
 
         @ai_func(name=f"{self.name}.drop")
