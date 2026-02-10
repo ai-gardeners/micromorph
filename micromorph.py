@@ -46,15 +46,11 @@ def nickname():
 
 # ------------ CORE CLASSES -------------
 
-class TViewPrototype(t.Protocol):
-    def __call__(self, *args, **kwargs) -> str: ...
-
-
 @dataclass
-class Feature(TViewPrototype):
+class Feature:
     name: str = field(default="")
     tools: list[ai_func] = field(default_factory=list)
-    views: list[TViewPrototype] = field(default_factory=list)
+    views: list[t.Callable] = field(default_factory=list)
 
     def __post_init__(self):
         if not self.name:
@@ -86,15 +82,13 @@ class Conversation:
     def file(self): return f"data/{nickname()}/conversation_history.json"
 
     def save(self):
-        data = [asdict(msg) for msg in self.history]
-        mc.storage.write_json(self.file(), data, True, False)
+        mc.storage.write_json(self.file(), [asdict(msg) for msg in self.history], True, False)
 
     def load(self):
         data = mc.storage.read_json(self.file(), [])
         self.history = deque([mc.Msg(**i) for i in data], maxlen=self.maxlen)
 
-    def __post_init__(self):
-        self.load()
+    def __post_init__(self): self.load()
 
     def add(self, msg: mc.Msg):
         self.history.append(msg)
@@ -154,9 +148,7 @@ class CtxMemoryStruct(Feature):
 conv = Conversation()
 memory_struct = CtxMemoryStruct(
     name="memory_struct",
-    data={
-        "observations": {"sub-categoy-1": "Likely I should delete this"}
-    }
+    data={"self_model": {"identity": "MicroMorph v0.1"}}
 )
 features = [memory_struct]
 prompt = """
@@ -230,7 +222,7 @@ async def agent(master_instructions = "..."):
                 exec_out += await py_exec(content) + "\n"
         if exec_out: exec_out = "TOOLS CALLING OUTPUT:\n" + exec_out
         else:
-            begin = "NO TOOLS WAS CALLED."
+            begin = "NO TOOLS WERE CALLED."
             if is_subagent(): exec_out = ui.red(f"{begin}\nUse <call>request_master(...)</call>")
             else:
                 exec_out = ui.red(f"{begin}\nLOOKS LIKE MICROMORPH FORGOT TO REQUEST MASTER.")
