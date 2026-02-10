@@ -12,30 +12,24 @@ from microcore.python import execute_inline
 from skills import *
 
 # -------------- CONSTANTS ----------------
+
 NO_OUTPUT_CAPTURE = "NO_OUTPUT"
 ARG_QUICK_FAIL = "--quick-fail"
 ARG_NICKNAME = "--nickname"
 ARG_SUBAGENT = "--subagent"
 ARG_FRESH = "--fresh"
+
 # ------------- BOOTSTRAP -------------
 
-mc.configure(
-    DOT_ENV_FILE=".env",
-    USE_LOGGING="print_stream",
-    DEFAULT_AI_FUNCTION_SYNTAX="pythonic",
-    STORAGE_PATH='.',
-    EMBEDDING_DB_TYPE=mc.EmbeddingDbType.NONE,
-)
+mc.configure(DOT_ENV_FILE=".env", USE_LOGGING="print_stream", DEFAULT_AI_FUNCTION_SYNTAX="pythonic", STORAGE_PATH='.', EMBEDDING_DB_TYPE=mc.EmbeddingDbType.NONE, INTERACTIVE_SETUP=True)
 mc.logging.LoggingConfig.STRIP_REQUEST_LINES = None
 
 # --------------CLI----------------------
+
 def halt_if_quick_fail():
     if ARG_QUICK_FAIL in sys.argv: print(ui.red(f"(!) {ARG_QUICK_FAIL}: [Y] >> Exit Status 1")), exit(1)
-
 def is_subagent(): return ARG_SUBAGENT in sys.argv
-
 def is_fresh_start(): return ARG_FRESH in sys.argv
-
 @lru_cache()
 def nickname():
     if ARG_NICKNAME in sys.argv:
@@ -73,7 +67,6 @@ class Feature:
             **kwargs,
         )
 
-
 @dataclass
 class Conversation:
     maxlen: int = field(default=100)
@@ -81,8 +74,7 @@ class Conversation:
 
     def file(self): return f"data/{nickname()}/conversation_history.json"
 
-    def save(self):
-        mc.storage.write_json(self.file(), [asdict(msg) for msg in self.history], True, False)
+    def save(self): mc.storage.write_json(self.file(), [asdict(msg) for msg in self.history], True, False)
 
     def load(self):
         data = mc.storage.read_json(self.file(), [])
@@ -144,7 +136,6 @@ class CtxMemoryStruct(Feature):
         self.tools, self.views = [drop, write], [view]
         for tool in self.tools: setattr(self, tool.__name__, tool)
 
-
 conv = Conversation()
 memory_struct = CtxMemoryStruct(
     name="memory_struct",
@@ -192,7 +183,6 @@ async def py_exec(content: str) -> str:
     summary = _(f"{ui.blue}{ui.bright}CALL:{ui.yellow}{ui.normal} {content}{ui.reset}\n")
     frame = inspect.currentframe().f_back
     namespace = {**frame.f_globals, **frame.f_locals}
-
     result, output, error = await execute_inline(content, namespace)
     if result:
         summary += _(f"-> {ui.gray}{repr(result).strip()}{ui.reset}\n")
@@ -205,11 +195,9 @@ async def py_exec(content: str) -> str:
         halt_if_quick_fail()
     return summary.strip() or _("(silently executed with no output)")
 
-
 async def agent(master_instructions = "..."):
     conv.add(mc.UserMsg(master_instructions))
     def render_main() -> mc.SysMsg: return mc.prompt(prompt, **globals(), str=str).as_system
-
     while True:
         messages = list(conv.history) + [render_main()]
         out = await mc.allm(messages)
