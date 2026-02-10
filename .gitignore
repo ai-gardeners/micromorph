@@ -40,3 +40,6 @@ Thumbs.db
 # IDEs
 .vscode/
 ~*
+# Dev pagages
+microcore
+*.dist-info
