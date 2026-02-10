@@ -1,10 +1,4 @@
-import os
-import sys
-import asyncio
-import inspect
-import signal
-import typing as t
-import textwrap
+import os, sys, asyncio, inspect, signal, typing as t, textwrap
 from collections import deque
 from dataclasses import asdict, dataclass, field
 from functools import lru_cache
@@ -53,8 +47,7 @@ def nickname():
 # ------------ CORE CLASSES -------------
 
 class TViewPrototype(t.Protocol):
-    def __call__(self, *args, **kwargs) -> str:
-        ...
+    def __call__(self, *args, **kwargs) -> str: ...
 
 
 @dataclass
@@ -117,11 +110,9 @@ class CtxMemoryStruct(Feature):
     _fn: str = field(init=False)
     data: dict[str, t.Any] = field(default_factory=dict)
 
-    def _save(self):
-        mc.storage.write_json(self._fn, self.data, backup_existing=False, rewrite_existing=True)
+    def _save(self): mc.storage.write_json(self._fn, self.data, backup_existing=False, rewrite_existing=True)
 
-    def _load(self):
-        self.data = mc.storage.read_json(self._fn, default=self.data)
+    def _load(self): self.data = mc.storage.read_json(self._fn, default=self.data)
 
     def clear(self):
         self.data = {}
@@ -164,9 +155,7 @@ conv = Conversation()
 memory_struct = CtxMemoryStruct(
     name="memory_struct",
     data={
-        "observations": {
-            "sub-categoy-1": "Likely I should delete this"
-        }
+        "observations": {"sub-categoy-1": "Likely I should delete this"}
     }
 )
 features = [memory_struct]
@@ -239,29 +228,24 @@ async def agent(master_instructions = "..."):
         for tag, attrs, content in blocks:
             if tag == "call":
                 exec_out += await py_exec(content) + "\n"
-        if exec_out:
-            exec_out = "TOOLS CALLING OUTPUT:\n" + exec_out
+        if exec_out: exec_out = "TOOLS CALLING OUTPUT:\n" + exec_out
         else:
             begin = "NO TOOLS WAS CALLED."
-            if is_subagent():
-                exec_out = ui.red(f"{begin}\nUse <call>request_master(...)</call>")
+            if is_subagent(): exec_out = ui.red(f"{begin}\nUse <call>request_master(...)</call>")
             else:
                 exec_out = ui.red(f"{begin}\nLOOKS LIKE MICROMORPH FORGOT TO REQUEST MASTER.")
                 conv.add(mc.UserMsg(exec_out.strip()))
                 exec_out = request_master(exec_out)
         conv.add(mc.UserMsg(exec_out.strip()))
 
-
 def main():
     print(f"[worker #{os.getpid()} started]")
 
-    def managed_cleanup(sig, frame):
-        # triggered by kill_worker(), skills/swarm.py
+    def managed_cleanup(sig, frame):  # triggered by kill_worker(), skills/swarm.py
         print("cleanup by MASTER request...")
         memory_struct.clear()
         conv.clear()
         sys.exit(0)
-
     signal.signal(signal.SIGUSR1, managed_cleanup)
 
     if is_fresh_start():
